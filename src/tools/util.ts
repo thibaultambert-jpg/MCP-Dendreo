@@ -25,3 +25,16 @@ export function normalize(s: unknown): string {
     .toLowerCase()
     .trim();
 }
+
+/** Ajoute n jours à une date AAAA-MM-JJ. */
+export function addDays(date: string, n: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Sépare « AAAA-MM-JJ HH:MM:SS » en date et heure HH:MM. */
+export function splitDateTime(value: unknown): { date: string; heure: string } {
+  const s = String(value ?? "");
+  return { date: s.slice(0, 10), heure: s.slice(11, 16) };
+}
