@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { DendreoClient } from "../dendreo/client.js";
+import { json } from "./util.js";
 
 // Outil de lecture générique, en attendant les outils métier écrits à partir de la doc API.
 export function registerGenericTools(server: McpServer, client: DendreoClient) {
@@ -22,7 +23,7 @@ export function registerGenericTools(server: McpServer, client: DendreoClient) {
     },
     async ({ endpoint, params }) => {
       const data = await client.get(endpoint, params);
-      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+      return json(data);
     },
   );
 }
