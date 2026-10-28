@@ -16,6 +16,17 @@ const FIELDS = [
   "id_etape_process",
 ].join(",");
 
+// La liste (INDEX) ne renvoie pas nb_participants_inscrits : on le lit via un SHOW multiple (?id=1,2,3).
+async function withInscrits(client: DendreoClient, rows: Row[]): Promise<Row[]> {
+  if (rows.length === 0) return rows;
+  const details = await client.list("actions_de_formation.php", {
+    id: rows.map((r) => r.id_action_de_formation).join(","),
+    fields: "id_action_de_formation,nb_participants_inscrits,nb_participants_en_attente,nb_participants_max",
+  });
+  const byId = new Map(details.map((d) => [String(d.id_action_de_formation), d]));
+  return rows.map((r) => ({ ...r, ...byId.get(String(r.id_action_de_formation)) }));
+}
+
 function summarize(rows: Row[]) {
   return rows
     .map((r) => ({
@@ -26,6 +37,7 @@ function summarize(rows: Row[]) {
       date_debut: r.date_debut,
       date_fin: r.date_fin,
       inscrits: r.nb_participants_inscrits ?? r.total_participants,
+      en_attente: r.nb_participants_en_attente,
       places_max: r.nb_participants_max,
     }))
     .sort((a, b) => String(a.date_debut).localeCompare(String(b.date_debut)));
@@ -54,7 +66,7 @@ export function registerSessionTools(server: McpServer, client: DendreoClient) {
         started_before: jusqu_au,
         fields: FIELDS,
       });
-      return json(summarize(rows));
+      return json(summarize(await withInscrits(client, rows)));
     },
   );
 
@@ -80,7 +92,7 @@ export function registerSessionTools(server: McpServer, client: DendreoClient) {
         started_before: `${last} 23:59:59`,
         fields: FIELDS,
       });
-      return json({ mois: first.slice(0, 7), sessions: summarize(rows) });
+      return json({ mois: first.slice(0, 7), sessions: summarize(await withInscrits(client, rows)) });
     },
   );
 }
