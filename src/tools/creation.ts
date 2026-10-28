@@ -1,36 +1,13 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { DendreoClient, Row } from "../dendreo/client.js";
-import { json, normalize } from "./util.js";
+import { findEntreprise, findEtape, findFormateur, findModule, findSalle, single } from "./resolve.js";
+import { json } from "./util.js";
 
 type Slot = { date: string; heure_debut: string; heure_fin: string };
 
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const HORAIRES = /^\d{2}:\d{2}-\d{2}:\d{2}(;\d{2}:\d{2}-\d{2}:\d{2})*$/;
-
-async function findModule(client: DendreoClient, formation: string): Promise<Row[]> {
-  const fields = "id_module,intitule,numero_complet";
-  let rows = await client.list("modules.php", { intitule: formation, fields });
-  if (rows.length === 0) rows = await client.list("modules.php", { keywords: formation, fields });
-  const exact = rows.filter((r) => normalize(r.intitule) === normalize(formation));
-  return exact.length > 0 ? exact : rows;
-}
-
-async function findFormateur(client: DendreoClient, nomComplet: string): Promise<Row[]> {
-  const fields = "id_formateur,nom,prenom,email_pro";
-  const target = normalize(nomComplet);
-  const seen = new Map<string, Row>();
-  for (const token of nomComplet.split(/\s+/).filter((t) => t.length > 1)) {
-    for (const r of await client.list("formateurs.php", { nom: token, fields })) {
-      seen.set(String(r.id_formateur), r);
-    }
-  }
-  const all = [...seen.values()];
-  const exact = all.filter(
-    (r) => normalize(`${r.prenom} ${r.nom}`) === target || normalize(`${r.nom} ${r.prenom}`) === target,
-  );
-  return exact.length > 0 ? exact : all;
-}
 
 function slotsFor(dates: string[], horaires: string): Slot[] {
   return [...dates].sort().flatMap((date) =>
@@ -67,7 +44,14 @@ export function registerCreationTools(server: McpServer, client: DendreoClient) 
           .default("09:00-12:30;13:30-17:00")
           .describe("Plages horaires de chaque jour, ex. 09:00-12:30;13:30-17:00"),
         type: z.enum(["inter", "intra"]).default("inter").describe("inter (multi-entreprises) ou intra (une entreprise)"),
-        id_entreprise: z.number().int().optional().describe("Obligatoire si type=intra"),
+        entreprise: z.string().optional().describe("Obligatoire si type=intra : raison sociale, numéro ENT_… ou id"),
+        id_entreprise: z.number().int().optional().describe("Alternative à entreprise"),
+        etape: z.string().optional().describe("Étape de l'ADF (ex. « Prévisionnelle »). Par défaut celle configurée dans Dendreo"),
+        salle: z.string().optional().describe("Salle de formation (intitulé ou id). Par défaut celle du module"),
+        prix: z.number().optional().describe("Prix personnalisé. Par défaut celui du module"),
+        places_min: z.number().int().optional(),
+        places_max: z.number().int().optional(),
+        id_responsable: z.number().int().optional().describe("Administrateur Dendreo responsable de la session"),
         intitule: z.string().optional().describe("Intitulé de la session, par défaut celui du module"),
         id_module: z.number().int().optional().describe("À fournir si plusieurs modules correspondent"),
         id_formateur: z.number().int().optional().describe("À fournir si plusieurs formateurs correspondent"),
@@ -76,9 +60,35 @@ export function registerCreationTools(server: McpServer, client: DendreoClient) 
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
     async (args) => {
-      if (args.type === "intra" && !args.id_entreprise) {
-        return json({ erreur: "id_entreprise est obligatoire pour une session intra" });
+      if (args.type === "intra" && !args.id_entreprise && !args.entreprise) {
+        return json({ erreur: "L'entreprise est obligatoire pour une session intra." });
       }
+      const extra: Row = {};
+      const libelles: Row = {};
+      if (args.entreprise) {
+        const r = single(await findEntreprise(client, args.entreprise), "Entreprise");
+        if (!("row" in r)) return json(r);
+        extra.id_entreprise = r.row.id_entreprise;
+        libelles.entreprise = r.row.raison_sociale;
+      } else if (args.id_entreprise) {
+        extra.id_entreprise = args.id_entreprise;
+      }
+      if (args.etape) {
+        const r = single(await findEtape(client, args.etape), "Étape");
+        if (!("row" in r)) return json(r);
+        extra.id_etape_process = r.row.id_etape_process;
+        libelles.etape = r.row.intitule;
+      }
+      if (args.salle) {
+        const r = single(await findSalle(client, args.salle), "Salle");
+        if (!("row" in r)) return json(r);
+        extra.id_salle_de_formation = r.row.id_salle_de_formation;
+        libelles.salle = r.row.intitule;
+      }
+      if (args.prix !== undefined) extra.prix = args.prix;
+      if (args.places_min !== undefined) extra.nb_participants_min = args.places_min;
+      if (args.places_max !== undefined) extra.nb_participants_max = args.places_max;
+      if (args.id_responsable !== undefined) extra.id_responsable = args.id_responsable;
 
       const modules = args.id_module
         ? await client.list("modules.php", { id: args.id_module, fields: "id_module,intitule,numero_complet" })
@@ -106,12 +116,13 @@ export function registerCreationTools(server: McpServer, client: DendreoClient) 
         date_fin: dates[dates.length - 1],
         id_module: module.id_module,
         id_formateur: formateur.id_formateur,
-        ...(args.id_entreprise ? { id_entreprise: args.id_entreprise } : {}),
+        ...extra,
       };
 
       const plan = {
         module,
         formateur,
+        ...libelles,
         action_de_formation: adf,
         creneaux: slots.map(slotKey),
       };
