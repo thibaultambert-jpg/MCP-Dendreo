@@ -46,7 +46,30 @@ export class DendreoClient {
     return this.request("DELETE", endpoint, query);
   }
 
-  private async request(method: string, endpoint: string, query: Query, body?: Row): Promise<unknown> {
+  /** Envoie un fichier en multipart/form-data (champ `file`) avec des champs texte. */
+  postFile(endpoint: string, fields: Row, file: { nom: string; contenu: Buffer; type?: string }): Promise<unknown> {
+    const form = new FormData();
+    for (const [k, v] of Object.entries(fields)) {
+      if (v !== undefined && v !== null) form.set(k, String(v));
+    }
+    form.set("file", new Blob([new Uint8Array(file.contenu)], { type: file.type ?? "application/octet-stream" }), file.nom);
+    return this.request("POST", endpoint, {}, form);
+  }
+
+  /** GET d'un fichier binaire (document généré, export) : contenu et métadonnées. */
+  async download(endpoint: string, query: Query): Promise<{ contenu: Buffer; type: string; nom?: string }> {
+    const res = await this.fetch("GET", endpoint, query);
+    const contenu = Buffer.from(await res.arrayBuffer());
+    const type = res.headers.get("content-type") ?? "application/octet-stream";
+    // Dendreo renvoie une erreur JSON (statut 200 ou non) si le document ne peut pas être généré.
+    if (type.includes("json")) {
+      throw new DendreoError(`Dendreo GET ${endpoint} : ${contenu.toString("utf8").slice(0, 500)}`, res.status);
+    }
+    const nom = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(res.headers.get("content-disposition") ?? "")?.[1];
+    return { contenu, type, nom: nom ? decodeURIComponent(nom) : undefined };
+  }
+
+  private async fetch(method: string, endpoint: string, query: Query, body?: Row | FormData): Promise<Response> {
     if (!ENDPOINT.test(endpoint)) throw new DendreoError(`Endpoint invalide : ${endpoint}`);
     const url = new URL(endpoint, this.baseUrl);
     for (const [k, v] of Object.entries(query)) {
@@ -56,12 +79,18 @@ export class DendreoClient {
       Authorization: `Token token="${this.apiKey}"`,
       Accept: "application/json",
     };
-    if (body) headers["Content-Type"] = "application/json";
-    const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
-    const text = await res.text();
+    const isForm = body instanceof FormData;
+    if (body && !isForm) headers["Content-Type"] = "application/json";
+    const res = await fetch(url, { method, headers, body: isForm ? body : body ? JSON.stringify(body) : undefined });
     if (!res.ok) {
+      const text = await res.text();
       throw new DendreoError(`Dendreo ${method} ${endpoint} → ${res.status} : ${text.slice(0, 500)}`, res.status);
     }
+    return res;
+  }
+
+  private async request(method: string, endpoint: string, query: Query, body?: Row | FormData): Promise<unknown> {
+    const text = await (await this.fetch(method, endpoint, query, body)).text();
     if (!text) return null;
     try {
       return JSON.parse(text);

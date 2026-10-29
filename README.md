@@ -47,6 +47,22 @@ Gestion des sessions (écritures en simulation par défaut) :
 | `sessions_permanentes` | Sessions permanentes d'un module ; modifier prix, durée, ouverture |
 | `prochaines_sessions_catalogue` | Sessions visibles sur le catalogue en ligne |
 
+CRM et documents (écritures en simulation par défaut) :
+
+| Outil | Rôle |
+|---|---|
+| `fiche_entreprise` | Vue 360° : coordonnées, contacts, participants, formations, actions commerciales, opportunités |
+| `enregistrer_entreprise` / `enregistrer_contact` / `enregistrer_participant` | Création ou mise à jour d'une fiche CRM, avec détection des doublons |
+| `convertir_en_particulier` | Conversion d'un participant ou d'une entreprise en particulier |
+| `actions_commerciales` | Lister les échanges et relances, ajouter un compte rendu |
+| `opportunites` | Pipe commercial par étape, création d'une opportunité |
+| `generer_document` | Génère convocation, convention, attestation… depuis un modèle Dendreo (un participant ou tous) |
+| `fichiers` | Lister, déposer ou supprimer les fichiers d'une session ou d'une fiche |
+| `suivi_emails` | Emails envoyés par Dendreo et statut de chaque destinataire (délivré, rejeté…) |
+| `checklist` | Avancement des checklists d'une session ; cocher, décocher, ajouter des points |
+
+L'API Dendreo ne permet pas d'envoyer un email : l'envoi, la programmation et les automatismes restent dans Dendreo.
+
 Écriture (toutes en **simulation par défaut**, `dry_run=true` : rien n'est écrit sans confirmation) :
 
 | Outil | Rôle |
