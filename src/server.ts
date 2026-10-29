@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { DendreoClient } from "./dendreo/client.js";
 import { registerCreationTools } from "./tools/creation.js";
 import { registerGenericTools } from "./tools/generic.js";
+import { registerGestionTools } from "./tools/gestion.js";
 import { registerInscriptionTools } from "./tools/inscriptions.js";
 import { registerLectureTools } from "./tools/lecture.js";
 import { registerPlanningTools } from "./tools/planning.js";
@@ -17,6 +18,7 @@ export function createServer(): McpServer {
   registerInscriptionTools(server, client);
   registerPlanningTools(server, client);
   registerSuiviTools(server, client);
+  registerGestionTools(server, client);
   registerGenericTools(server, client);
   return server;
 }

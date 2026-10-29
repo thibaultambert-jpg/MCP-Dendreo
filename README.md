@@ -29,6 +29,24 @@ Suivi pédagogique :
 | `evaluer_participant` | Enregistre une évaluation de module ou de compétence — simulation par défaut |
 | `satisfaction` | Synthèse des questionnaires de satisfaction par session, formateur ou formation |
 
+Gestion des sessions (écritures en simulation par défaut) :
+
+| Outil | Rôle |
+|---|---|
+| `modifier_session` | Étape, intitulé, salle, places, responsable, commentaires, publication en ligne, émargement, champs personnalisés |
+| `annuler_inscription` | Désinscrit des participants (refusé si des présences sont saisies) |
+| `modifier_inscription` | Prix, n° de dossier CPF, suivi pédagogique, champs personnalisés d'une inscription |
+| `transferer_inscription` | Déplace un participant vers une autre session |
+| `inscription_modules` | Modules suivis par chaque participant d'une session multi-modules ; inscrire/désinscrire d'un module |
+| `retirer_formateur` | Déstaffe un formateur (certains jours ou toute la session) |
+| `dupliquer_session` | Recrée une session existante sur de nouvelles dates |
+| `formateurs_disponibles` | Formateurs aptes à un module et libres aux dates voulues |
+| `conflits_planning` | Formateurs ou salles réservés sur deux créneaux qui se chevauchent |
+| `souhaits_formation` | Lister, ajouter, supprimer les souhaits de formation |
+| `entreprises_session` | Entreprises d'une session et contact référent (modifiable) |
+| `sessions_permanentes` | Sessions permanentes d'un module ; modifier prix, durée, ouverture |
+| `prochaines_sessions_catalogue` | Sessions visibles sur le catalogue en ligne |
+
 Écriture (toutes en **simulation par défaut**, `dry_run=true` : rien n'est écrit sans confirmation) :
 
 | Outil | Rôle |
