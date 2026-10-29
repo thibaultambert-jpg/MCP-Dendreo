@@ -76,3 +76,24 @@ export function single(rows: Row[], quoi: string): { row: Row } | { erreur: stri
     candidats: rows.slice(0, 15),
   };
 }
+
+/** Inscriptions (laps) d'une session, avec la fiche du participant. */
+export function inscriptionsSession(client: DendreoClient, idAdf: string): Promise<Row[]> {
+  return client.list("laps.php", { id_action_de_formation: idAdf, include: "participant" });
+}
+
+/** Retrouve une inscription par id_lap, id_participant, email ou « prénom nom ». */
+export function findInscription(laps: Row[], query: string): Row[] {
+  const q = normalize(query);
+  if (isId(query)) {
+    return laps.filter((l) => String(l.id_lap) === query || String(l.id_participant) === query);
+  }
+  const p = (l: Row) => (l.participant ?? {}) as Row;
+  const byEmail = laps.filter((l) => normalize(p(l).email) === q);
+  if (byEmail.length > 0) return byEmail;
+  const exact = laps.filter(
+    (l) => normalize(`${p(l).prenom} ${p(l).nom}`) === q || normalize(`${p(l).nom} ${p(l).prenom}`) === q,
+  );
+  if (exact.length > 0) return exact;
+  return laps.filter((l) => normalize(`${p(l).prenom} ${p(l).nom}`).includes(q));
+}

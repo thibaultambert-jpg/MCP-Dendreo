@@ -17,6 +17,18 @@ Lecture :
 | `catalogue` | Modules (durée, prix, formateurs aptes), formateurs, entreprises, salles, étapes |
 | `dendreo_get` | Lecture brute de n'importe quelle ressource de l'API (exploration) |
 
+Suivi pédagogique :
+
+| Outil | Rôle |
+|---|---|
+| `feuille_presence` | Présences/absences par participant et créneau, heures suivies, assiduité |
+| `saisir_presences` | Marque présent ou absent (justifié ou non, partiel) sur des jours ou créneaux — simulation par défaut |
+| `taches_en_attente` | Émargements, signatures et questionnaires en attente sur l'extranet, avec les liens de relance |
+| `emargements_manquants` | Créneaux passés sans présence renseignée, pour une session ou une période |
+| `evaluations_session` | Réussite par module, notes, compétences acquises |
+| `evaluer_participant` | Enregistre une évaluation de module ou de compétence — simulation par défaut |
+| `satisfaction` | Synthèse des questionnaires de satisfaction par session, formateur ou formation |
+
 Écriture (toutes en **simulation par défaut**, `dry_run=true` : rien n'est écrit sans confirmation) :
 
 | Outil | Rôle |

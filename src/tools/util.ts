@@ -38,3 +38,12 @@ export function splitDateTime(value: unknown): { date: string; heure: string } {
   const s = String(value ?? "");
   return { date: s.slice(0, 10), heure: s.slice(11, 16) };
 }
+
+/** « Prénom Nom » d'un participant ou formateur renvoyé par Dendreo. */
+export function nomDe(p: unknown): string | undefined {
+  const r = (p ?? {}) as Record<string, unknown>;
+  return [r.prenom, r.nom].filter(Boolean).join(" ") || undefined;
+}
+
+/** Valeur Dendreo « vraie » (1, "1", true). */
+export const vrai = (v: unknown) => v === true || String(v) === "1";
