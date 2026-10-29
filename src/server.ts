@@ -10,9 +10,10 @@ import { registerLectureTools } from "./tools/lecture.js";
 import { registerPlanningTools } from "./tools/planning.js";
 import { registerSessionTools } from "./tools/sessions.js";
 import { registerSuiviTools } from "./tools/suivi.js";
+import { registerSyntheseTools } from "./tools/synthese.js";
 
 export function createServer(): McpServer {
-  const server = new McpServer({ name: "dendreo", version: "0.2.0" });
+  const server = new McpServer({ name: "dendreo", version: "0.3.0" });
   const client = DendreoClient.fromEnv();
   registerSessionTools(server, client);
   registerLectureTools(server, client);
@@ -23,6 +24,7 @@ export function createServer(): McpServer {
   registerGestionTools(server, client);
   registerCrmTools(server, client);
   registerDocumentTools(server, client);
+  registerSyntheseTools(server, client);
   registerGenericTools(server, client);
   return server;
 }

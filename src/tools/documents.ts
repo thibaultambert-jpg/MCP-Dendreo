@@ -13,7 +13,7 @@ const nomLap = (l: Row) => nomDe(l.participant) ?? `participant ${l.id_participa
 const MAX_DOCUMENTS = 20;
 
 /** Résumé d'un email envoyé, avec le statut de chaque destinataire. */
-function resumeEmail(m: Row) {
+export function resumeEmail(m: Row) {
   const destinataires = ((m.destinataires ?? []) as Row[]).map((d) => ({
     email: d.email,
     type: d.type_destinataire,

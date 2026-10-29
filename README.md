@@ -63,6 +63,13 @@ CRM et documents (écritures en simulation par défaut) :
 
 L'API Dendreo ne permet pas d'envoyer un email : l'envoi, la programmation et les automatismes restent dans Dendreo.
 
+Synthèses :
+
+| Outil | Rôle |
+|---|---|
+| `tableau_de_bord_session` | « Où en est la session ? » : remplissage, staffing, assiduité, tâches en attente, emails en échec, checklists, points d'attention |
+| `relances_a_faire` | Participants à relancer sur une période (émargement, signature, questionnaire, email non délivré), avec les liens |
+
 Écriture (toutes en **simulation par défaut**, `dry_run=true` : rien n'est écrit sans confirmation) :
 
 | Outil | Rôle |

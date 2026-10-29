@@ -24,7 +24,7 @@ const nomLap = (l: Row | undefined) =>
   nomDe(l?.participant) ?? (l && String(l.id_participant) === "0" ? "Participant non identifié" : `lap ${l?.id_lap}`);
 
 /** État d'une présence : présent, absent (justifié ou non), ou non renseigné. */
-function statut(lcp: Row): "present" | "absent_justifie" | "absent_non_justifie" | "non_renseigne" {
+export function statut(lcp: Row): "present" | "absent_justifie" | "absent_non_justifie" | "non_renseigne" {
   if (vrai(lcp.presence)) return "present";
   if (Number(lcp.total_heures_absence ?? 0) > 0 || String(lcp.presence) === "0") {
     return vrai(lcp.justified) ? "absent_justifie" : "absent_non_justifie";
