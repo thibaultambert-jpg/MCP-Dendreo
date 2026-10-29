@@ -17,6 +17,59 @@ Lecture :
 | `catalogue` | Modules (durée, prix, formateurs aptes), formateurs, entreprises, salles, étapes |
 | `dendreo_get` | Lecture brute de n'importe quelle ressource de l'API (exploration) |
 
+Suivi pédagogique :
+
+| Outil | Rôle |
+|---|---|
+| `feuille_presence` | Présences/absences par participant et créneau, heures suivies, assiduité |
+| `saisir_presences` | Marque présent ou absent (justifié ou non, partiel) sur des jours ou créneaux — simulation par défaut |
+| `taches_en_attente` | Émargements, signatures et questionnaires en attente sur l'extranet, avec les liens de relance |
+| `emargements_manquants` | Créneaux passés sans présence renseignée, pour une session ou une période |
+| `evaluations_session` | Réussite par module, notes, compétences acquises |
+| `evaluer_participant` | Enregistre une évaluation de module ou de compétence — simulation par défaut |
+| `satisfaction` | Synthèse des questionnaires de satisfaction par session, formateur ou formation |
+
+Gestion des sessions (écritures en simulation par défaut) :
+
+| Outil | Rôle |
+|---|---|
+| `modifier_session` | Étape, intitulé, salle, places, responsable, commentaires, publication en ligne, émargement, champs personnalisés |
+| `annuler_inscription` | Désinscrit des participants (refusé si des présences sont saisies) |
+| `modifier_inscription` | Prix, n° de dossier CPF, suivi pédagogique, champs personnalisés d'une inscription |
+| `transferer_inscription` | Déplace un participant vers une autre session |
+| `inscription_modules` | Modules suivis par chaque participant d'une session multi-modules ; inscrire/désinscrire d'un module |
+| `retirer_formateur` | Déstaffe un formateur (certains jours ou toute la session) |
+| `dupliquer_session` | Recrée une session existante sur de nouvelles dates |
+| `formateurs_disponibles` | Formateurs aptes à un module et libres aux dates voulues |
+| `conflits_planning` | Formateurs ou salles réservés sur deux créneaux qui se chevauchent |
+| `souhaits_formation` | Lister, ajouter, supprimer les souhaits de formation |
+| `entreprises_session` | Entreprises d'une session et contact référent (modifiable) |
+| `sessions_permanentes` | Sessions permanentes d'un module ; modifier prix, durée, ouverture |
+| `prochaines_sessions_catalogue` | Sessions visibles sur le catalogue en ligne |
+
+CRM et documents (écritures en simulation par défaut) :
+
+| Outil | Rôle |
+|---|---|
+| `fiche_entreprise` | Vue 360° : coordonnées, contacts, participants, formations, actions commerciales, opportunités |
+| `enregistrer_entreprise` / `enregistrer_contact` / `enregistrer_participant` | Création ou mise à jour d'une fiche CRM, avec détection des doublons |
+| `convertir_en_particulier` | Conversion d'un participant ou d'une entreprise en particulier |
+| `actions_commerciales` | Lister les échanges et relances, ajouter un compte rendu |
+| `opportunites` | Pipe commercial par étape, création d'une opportunité |
+| `generer_document` | Génère convocation, convention, attestation… depuis un modèle Dendreo (un participant ou tous) |
+| `fichiers` | Lister, déposer ou supprimer les fichiers d'une session ou d'une fiche |
+| `suivi_emails` | Emails envoyés par Dendreo et statut de chaque destinataire (délivré, rejeté…) |
+| `checklist` | Avancement des checklists d'une session ; cocher, décocher, ajouter des points |
+
+L'API Dendreo ne permet pas d'envoyer un email : l'envoi, la programmation et les automatismes restent dans Dendreo.
+
+Synthèses :
+
+| Outil | Rôle |
+|---|---|
+| `tableau_de_bord_session` | « Où en est la session ? » : remplissage, staffing, assiduité, tâches en attente, emails en échec, checklists, points d'attention |
+| `relances_a_faire` | Participants à relancer sur une période (émargement, signature, questionnaire, email non délivré), avec les liens |
+
 Écriture (toutes en **simulation par défaut**, `dry_run=true` : rien n'est écrit sans confirmation) :
 
 | Outil | Rôle |

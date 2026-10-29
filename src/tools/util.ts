@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 export function json(data: unknown): CallToolResult {
@@ -38,3 +39,18 @@ export function splitDateTime(value: unknown): { date: string; heure: string } {
   const s = String(value ?? "");
   return { date: s.slice(0, 10), heure: s.slice(11, 16) };
 }
+
+/** « Prénom Nom » d'un participant ou formateur renvoyé par Dendreo. */
+export function nomDe(p: unknown): string | undefined {
+  const r = (p ?? {}) as Record<string, unknown>;
+  return [r.prenom, r.nom].filter(Boolean).join(" ") || undefined;
+}
+
+/** Valeur Dendreo « vraie » (1, "1", true). */
+export const vrai = (v: unknown) => v === true || String(v) === "1";
+
+/** Champs personnalisés Dendreo, passés tels quels à l'API sous leur nom technique. */
+export const CHAMPS_PERSONNALISES = z
+  .record(z.union([z.string(), z.number(), z.boolean()]))
+  .optional()
+  .describe("Champs personnalisés par nom technique (visible dans Dendreo, configuration des champs additionnels)");
