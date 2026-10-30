@@ -64,11 +64,11 @@
 | Modules / participants | `modules`, `modules-adfs`, `modules-participants`, `participants-adfs`, `participants-formes`, `participants-formes-par-module`, `participants-par-module`, `participants-uniques-par-annee`, `participants-par-ajout`, `participants-avec-entreprise`, `newsletter` |
 | Formateurs | `creneaux-formateurs`, `interventions-formateurs`, `modules-realises-par-les-formateurs`, `notes-de-frais` |
 | BPF | `bpf-financements`, `bpf-formateurs`, `b-p-f-formations-sous-traitees`, `bpf-participants`, `bpf-participants-sous-traitance`, `bpf-participants-specialites` |
-| Finance | `budgets-adfs`, `c-a-facture-par-maison-mere`, `c-a-encaisse-par-mois`, `ca-facture-par-destinataire`*, `ca-facture-par-mois`, `ca-facture-par-mois-par-adf`, `ca-facture-par-entreprise`*, `analyse-delais-paiement`*, `factures`, `facture-avec-marge`, `factures-detail`, `factures-adf`, `production-commerciaux` |
+| Finance | `budgets-adfs`, `c-a-facture-par-maison-mere`, `c-a-encaisse-par-mois`, `ca-facture-par-destinataire`, `ca-facture-par-mois`, `ca-facture-par-mois-par-adf`, `ca-facture-par-entreprise`, `analyse-delais-paiement`, `factures`, `facture-avec-marge`, `factures-detail`, `factures-adf`, `production-commerciaux` |
 | Qualité | `checklists-adfs`, `checklists-fiches-formateurs`, `checklists-interventions-formateurs`, `competences-participants`, `evaluations`, `auto-positionnement`, `moyenne-ap-par-adf`, `quiz`, `quiz-notes-globales`, `satisfaction-formateur`, `satisf-formateur-par-participant`, `export-satisfaction-participant`, `invitations-rsvp`, `log-emails` |
-| Clients | `contacts`, `entreprises-clientes`*, `entreprises-clientes-emails`, `entreprises-clients-et-formations`* |
+| Clients | `contacts`, `entreprises-clientes`, `entreprises-clientes-emails`, `entreprises-clients-et-formations` |
 
-\* slug tronqué dans la doc, à confirmer dans Dendreo (colonne « Nom de l'Export via API »).
+Les slugs ont été confirmés avec `presentation-des-exports.md` (colonne « Nom de l'Export via API »).
 
 ---
 
@@ -199,4 +199,4 @@ Les enrichissements vont dans les fichiers existants (`suivi.ts`, `documents.ts`
 2. `npm run dev` puis `npx @modelcontextprotocol/inspector` sur `http://localhost:3000/api/mcp?token=…`.
 3. Appel de chaque outil de lecture sur l'instance réelle.
 4. Écritures testées **uniquement en `dry_run=true`**, contrôle du récapitulatif renvoyé.
-5. Vérification des 5 slugs d'export tronqués dans la doc.
+5. ~~Vérification des slugs d'export tronqués~~ : confirmés.
