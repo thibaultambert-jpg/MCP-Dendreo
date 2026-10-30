@@ -201,7 +201,7 @@ Lecture :
 | `indicateurs_activite` | Sessions, stagiaires, heures-stagiaires, remplissage, CA facturé par mois, avec comparaison N / N-1 |
 | `pilotage_adf` | Portefeuille de sessions par étape et type (INTER / INTRA) : inscrits, heures, financé, facturé, payé |
 
-La liste des slugs d'export figure dans la description de `telecharger_export`. Les slugs marqués d'une astérisque sont tronqués dans la documentation Dendreo : à confirmer dans l'infobulle de l'export.
+La liste des slugs d'export figure dans la description de `telecharger_export`.
 
 ### BPF, qualité et conformité
 

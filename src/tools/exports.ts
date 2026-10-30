@@ -10,13 +10,13 @@ const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const MAX_TEXTE = 100_000;
 
 export const SLUGS_EXPORT = [
-  "Activité : actions-de-formation, actions-de-formation-date-fin, creneaux, creneaux-participants, creneaux-participants-all, conflits, events, occupation-salles, a-d-f-et-salles-par-jour",
+  "Activité : actions-de-formation, actions-de-formation-date-fin, creneaux, creneaux-participants (présents uniquement, ADF confirmées), creneaux-participants-all (tous), conflits, events, occupation-salles, a-d-f-et-salles-par-jour",
   "Modules / participants : modules, modules-adfs, modules-participants, participants-adfs, participants-formes, participants-formes-par-module, participants-par-module, participants-uniques-par-annee, participants-par-ajout, participants-avec-entreprise, newsletter",
   "Formateurs : creneaux-formateurs, interventions-formateurs, modules-realises-par-les-formateurs, notes-de-frais",
   "BPF : bpf-financements, bpf-formateurs, b-p-f-formations-sous-traitees, bpf-participants, bpf-participants-sous-traitance, bpf-participants-specialites",
-  "Finance : budgets-adfs, c-a-facture-par-maison-mere, c-a-encaisse-par-mois, ca-facture-par-destinataire*, ca-facture-par-mois, ca-facture-par-mois-par-adf, ca-facture-par-entreprise*, analyse-delais-paiement*, factures, facture-avec-marge, factures-detail, factures-adf, production-commerciaux",
+  "Finance : budgets-adfs, c-a-facture-par-maison-mere, c-a-encaisse-par-mois, ca-facture-par-destinataire, ca-facture-par-mois, ca-facture-par-mois-par-adf, ca-facture-par-entreprise, analyse-delais-paiement, factures, facture-avec-marge, factures-detail, factures-adf, production-commerciaux",
   "Qualité : checklists-adfs, checklists-fiches-formateurs, checklists-interventions-formateurs, competences-participants, evaluations, auto-positionnement, moyenne-ap-par-adf, quiz, quiz-notes-globales, satisfaction-formateur, satisf-formateur-par-participant, export-satisfaction-participant, invitations-rsvp, log-emails",
-  "Clients : contacts, entreprises-clientes*, entreprises-clientes-emails, entreprises-clients-et-formations*",
+  "Clients : contacts, entreprises-clientes, entreprises-clientes-emails, entreprises-clients-et-formations",
 ].join(" | ");
 
 /** Renvoie un fichier téléchargé : texte pour un petit CSV, pièce jointe sinon. */
@@ -92,8 +92,8 @@ export function registerExportTools(server: McpServer, client: DendreoClient) {
       title: "Télécharger un export Dendreo",
       description:
         "Télécharge n'importe quel export du menu Reporting de Dendreo sur une période (`nom_export` = slug de l'export) " +
-        "et renvoie le fichier (CSV en texte s'il est court, sinon pièce jointe). Slugs connus (* = slug tronqué dans la doc, " +
-        `à confirmer dans l'infobulle de l'export dans Dendreo) : ${SLUGS_EXPORT}`,
+        "et renvoie le fichier (CSV en texte s'il est court, sinon pièce jointe). Slugs disponibles : " +
+        SLUGS_EXPORT,
       inputSchema: {
         nom_export: z.string().describe("Slug de l'export, ex. creneaux, ca-facture-par-mois, bpf-participants"),
         date_debut: DATE,
