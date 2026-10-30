@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { DendreoError, type DendreoClient, type Row } from "../dendreo/client.js";
-import { findFormateur, findSession, single } from "./resolve.js";
+import { findEntreprise, findFormateur, findSession, single } from "./resolve.js";
 import { addDays, json, splitDateTime } from "./util.js";
 
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -31,7 +31,8 @@ export function registerPlanningTools(server: McpServer, client: DendreoClient) 
         "Par défaut dry_run=true : rien n'est écrit. Ne relancer avec dry_run=false qu'après confirmation explicite.",
       inputSchema: {
         session: z.string().describe("Id de l'action de formation ou numéro complet (ADF_…)"),
-        formateur: z.string().describe("Formateur à staffer : prénom et nom, ou id"),
+        formateur: z.string().optional().describe("Formateur à staffer : prénom et nom, ou id (ou utiliser entreprise_sous_traitante)"),
+        entreprise_sous_traitante: z.string().optional().describe("Entreprise sous-traitante à staffer à la place d'un formateur (raison sociale, ENT_… ou id) : ajoutée à la session, sans créneaux"),
         jours: z.array(DATE).optional().describe("Limiter à ces jours (AAAA-MM-JJ). Par défaut tous les créneaux"),
         remplace: z.string().optional().describe("Formateur à retirer de ces créneaux : prénom et nom, ou id"),
         dry_run: z.boolean().default(true),
@@ -41,6 +42,18 @@ export function registerPlanningTools(server: McpServer, client: DendreoClient) 
     async (args) => {
       const s = single(await findSession(client, args.session, "id_action_de_formation,numero_complet,intitule"), "Session");
       if (!("row" in s)) return json(s);
+      if (args.entreprise_sous_traitante) {
+        const e = single(await findEntreprise(client, args.entreprise_sous_traitante), "Entreprise sous-traitante");
+        if (!("row" in e)) return json(e);
+        const idE = String(e.row.id_entreprise);
+        const existants = await client.list("lafs.php", { id_action_de_formation: String(s.row.id_action_de_formation) });
+        const dejaLa = existants.some((l) => String(l.id_entreprise_formateur) === idE);
+        const recap = { session: `${s.row.numero_complet} — ${s.row.intitule}`, entreprise_sous_traitante: e.row.raison_sociale, deja_staffee: dejaLa };
+        if (args.dry_run || dejaLa) return json({ dry_run: args.dry_run, ...recap });
+        await client.post("lafs.php", { id_action_de_formation: s.row.id_action_de_formation, id_entreprise_formateur: idE });
+        return json({ ok: true, ...recap });
+      }
+      if (!args.formateur) return json({ erreur: "Préciser formateur ou entreprise_sous_traitante." });
       const f = single(await findFormateur(client, args.formateur), "Formateur");
       if (!("row" in f)) return json(f);
       let ancien: Row | undefined;

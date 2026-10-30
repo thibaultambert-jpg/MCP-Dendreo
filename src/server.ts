@@ -10,6 +10,7 @@ import { registerGestionTools } from "./tools/gestion.js";
 import { registerInscriptionTools } from "./tools/inscriptions.js";
 import { registerLectureTools } from "./tools/lecture.js";
 import { registerPlanningTools } from "./tools/planning.js";
+import { registerQualiteTools } from "./tools/qualite.js";
 import { registerSessionTools } from "./tools/sessions.js";
 import { registerSuiviTools } from "./tools/suivi.js";
 import { registerSyntheseTools } from "./tools/synthese.js";
@@ -29,6 +30,7 @@ export function createServer(): McpServer {
   registerSyntheseTools(server, client);
   registerExportTools(server, client);
   registerFinanceTools(server, client);
+  registerQualiteTools(server, client);
   registerGenericTools(server, client);
   return server;
 }
