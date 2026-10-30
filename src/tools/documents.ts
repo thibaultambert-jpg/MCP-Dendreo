@@ -241,6 +241,10 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         session: SESSION.optional(),
         destinataire: z.string().optional().describe("Adresse email du destinataire"),
         echecs_seulement: z.boolean().default(false),
+        evenement: z.enum(["delivered", "dropped", "bounced", "complained"]).optional().describe("Filtrer sur le statut d'un destinataire"),
+        du: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Emails envoyés à partir de cette date"),
+        au: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Emails envoyés jusqu'à cette date"),
+        decalage: z.number().int().min(0).default(0).describe("Pagination : l'API renvoie 100 emails à partir de ce rang"),
       },
       annotations: { readOnlyHint: true },
     },
@@ -253,10 +257,10 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         idAdf = String(s.row.id_action_de_formation);
         label = sessionLabel(s.row);
       }
-      const rows = await client.list("emails.php", { id_action_de_formation: idAdf, to_email: args.destinataire });
-      let emails = rows.map(resumeEmail);
+      const rows = await client.list("emails.php", { id_action_de_formation: idAdf, to_email: args.destinataire, event: args.evenement, offset: args.decalage || undefined });
+      let emails = rows.map(resumeEmail).filter((e) => (!args.du || String(e.date).slice(0, 10) >= args.du) && (!args.au || String(e.date).slice(0, 10) <= args.au));
       if (args.echecs_seulement) emails = emails.filter((e) => e.en_echec);
-      return json({ session: label, nombre: emails.length, en_echec: emails.filter((e) => e.en_echec).length, emails });
+      return json({ session: label, page: rows.length >= 100 ? `100 emails lus à partir du rang ${args.decalage} : relancer avec decalage=${args.decalage + 100} pour la suite` : undefined, nombre: emails.length, en_echec: emails.filter((e) => e.en_echec).length, emails });
     },
   );
 
