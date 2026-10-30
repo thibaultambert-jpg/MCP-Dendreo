@@ -173,12 +173,14 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         "Dépôt et suppression en dry_run=true par défaut.",
       inputSchema: {
         action: z.enum(["lister", "deposer", "supprimer"]).default("lister"),
-        cible: z.enum(["action-de-formation", "participant", "entreprise", "formateur", "module", "contact"]).optional(),
+        cible: z.enum(["action-de-formation", "participant", "entreprise", "formateur", "module", "contact", "lap", "laf", "lae", "salle"]).optional().describe("Sans cible, un dépôt part sans rattachement (tri automatique par QR code de Dendreo)"),
         id_cible: z.string().optional().describe("Id de la fiche, ou de la session (id ou ADF_…) si cible=action-de-formation"),
-        collection: z.string().optional().describe("Collection Dendreo, par défaut l'espace de stockage (docssaved)"),
+        collection: z.string().optional().describe("Collection Dendreo, par défaut l'espace de stockage (docssaved). Autres : partage_adf_participants / _formateurs / _entreprises, partage_lap, partage_laf, partage_lae, partage_salle_public, partage_module_public, partage_module_formateurs, visuel, signature"),
         nom_fichier: z.string().optional().describe("Pour deposer : nom du fichier avec extension"),
         contenu_base64: z.string().optional().describe("Pour deposer : contenu du fichier encodé en base64"),
         dossier: z.string().optional().describe("Pour deposer sur une session : sous-dossier de l'espace de stockage"),
+        entite_liee_type: z.enum(["entreprise", "participant", "formateur", "module"]).optional().describe("Pour deposer sur une session : lie le fichier à cet élément de la session"),
+        entite_liee_id: z.string().optional().describe("Id de l'élément lié (avec entite_liee_type)"),
         ids: z.array(z.string()).optional().describe("Pour supprimer : ids des fichiers"),
         dry_run: z.boolean().default(true),
       },
@@ -192,6 +194,13 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         if (args.dry_run) return json({ dry_run: true, ...recap });
         await client.delete("fichiers.php", { id: args.ids.join(",") });
         return json({ ok: true, ...recap });
+      }
+      if (args.action === "deposer" && !args.cible && !args.id_cible) {
+        if (!args.nom_fichier || !args.contenu_base64) return json({ erreur: "Préciser nom_fichier et contenu_base64." });
+        const contenu = Buffer.from(args.contenu_base64, "base64");
+        const recap = { fichier: args.nom_fichier, taille_ko: Math.round(contenu.length / 1024), rattachement: "aucun (tri automatique par QR code)" };
+        if (args.dry_run) return json({ dry_run: true, ...recap });
+        return json({ ok: true, ...recap, resultat: await client.postFile("fichiers.php", {}, { nom: args.nom_fichier, contenu }) });
       }
       if (!args.cible || !args.id_cible) return json({ erreur: "Préciser cible et id_cible." });
       let idCible = args.id_cible;
@@ -222,6 +231,8 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         id_cible: idCible,
         collection: args.collection ?? "docssaved",
         chemin: args.dossier,
+        entite_liee_type: args.entite_liee_type,
+        entite_liee_id: args.entite_liee_id,
       };
       const recap = { fichier: args.nom_fichier, taille_ko: Math.round(contenu.length / 1024), ...champs };
       if (args.dry_run) return json({ dry_run: true, ...recap });
@@ -270,7 +281,8 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
       title: "Checklist administrative",
       description:
         "Affiche l'avancement des checklists d'une session (ou d'un formateur, d'un module) et permet de cocher ou " +
-        "décocher des points, ou d'en ajouter. Modifications en dry_run=true par défaut.",
+        "décocher, ajouter, renommer ou supprimer des points ; `portefeuille=true` liste les sessions INTER dont la " +
+        "checklist est incomplète. Modifications en dry_run=true par défaut.",
       inputSchema: {
         session: SESSION.optional(),
         cible: z.enum(["formateur", "module", "lap", "laf"]).optional().describe("Autre cible que la session"),
@@ -278,12 +290,22 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         cocher: z.array(z.string()).optional().describe("Points à cocher (id_check ou intitulé)"),
         decocher: z.array(z.string()).optional().describe("Points à décocher (id_check ou intitulé)"),
         ajouter: z.array(z.string()).optional().describe("Nouveaux points à ajouter"),
+        supprimer: z.array(z.string()).optional().describe("Points à supprimer (id_check ou intitulé)"),
+        renommer: z.array(z.object({ point: z.string().describe("id_check ou intitulé actuel"), intitule: z.string() })).optional(),
+        portefeuille: z.boolean().default(false).describe("Vue d'ensemble : sessions INTER dont la checklist est incomplète"),
         id_checklist: z.string().optional().describe("Checklist où ajouter, si la cible en a plusieurs"),
         dry_run: z.boolean().default(true),
       },
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
     async (args) => {
+      if (args.portefeuille) {
+        const rows = await client.list("checklists.php", { cible: "action_de_formation_inter" });
+        const incompletes = rows
+          .filter((c) => Number(c.checks_done ?? 0) < Number(c.checks_total ?? 0))
+          .map((c) => ({ id_cible: c.id_cible, id_checklist: c.id_checklist, remarque: c.remarque || undefined, avancement: `${c.checks_done}/${c.checks_total}`, restant: ((c.checks ?? []) as Row[]).filter((k) => !vrai(k.done)).map((k) => k.intitule) }));
+        return json({ checklists_incompletes: incompletes.length, sur: rows.length, incompletes });
+      }
       let query: Query;
       let label: string;
       if (args.session) {
@@ -301,7 +323,7 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
       const checks: Row[] = checklists.flatMap((c) => ((c.checks ?? []) as Row[]).map((k) => ({ ...k, id_checklist: c.id_checklist })));
       const trouver = (q: string) => checks.filter((k) => String(k.id_check) === q || String(k.intitule).toLowerCase().includes(q.toLowerCase()));
 
-      const ops: { quoi: string; body: Row }[] = [];
+      const ops: { quoi: string; body: Row; suppression?: boolean }[] = [];
       const inconnus: string[] = [];
       for (const [liste, done] of [[args.cocher, 1], [args.decocher, 0]] as const) {
         for (const q of liste ?? []) {
@@ -311,6 +333,16 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
             ops.push({ quoi: `${done ? "cocher" : "décocher"} « ${found[0].intitule} »`, body: { id_check: found[0].id_check, done } });
           }
         }
+      }
+      for (const q of args.supprimer ?? []) {
+        const found = trouver(q);
+        if (found.length !== 1) inconnus.push(`${q} (${found.length ? "ambigu" : "introuvable"})`);
+        else ops.push({ quoi: `supprimer « ${found[0].intitule} »`, body: { id_check: found[0].id_check }, suppression: true });
+      }
+      for (const r of args.renommer ?? []) {
+        const found = trouver(r.point);
+        if (found.length !== 1) inconnus.push(`${r.point} (${found.length ? "ambigu" : "introuvable"})`);
+        else ops.push({ quoi: `renommer « ${found[0].intitule} » en « ${r.intitule} »`, body: { id_check: found[0].id_check, intitule: r.intitule } });
       }
       if (args.ajouter?.length) {
         const idChecklist = args.id_checklist ?? (checklists.length === 1 ? checklists[0].id_checklist : undefined);
@@ -335,7 +367,8 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
       const journal: string[] = [];
       for (const o of ops) {
         try {
-          await client.post("checks.php", o.body);
+          if (o.suppression) await client.delete("checks.php", { id_check: String(o.body.id_check) });
+          else await client.post("checks.php", o.body);
           journal.push(`${o.quoi} : ok`);
         } catch (e) {
           journal.push(`${o.quoi} : erreur : ${(e as Error).message}`);
