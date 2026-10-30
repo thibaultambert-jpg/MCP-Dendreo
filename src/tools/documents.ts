@@ -40,7 +40,8 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         "Génère un document à partir d'un modèle Dendreo (convocation, convention, attestation, certificat de " +
         "réalisation, programme…) et renvoie le fichier. Le modèle se désigne par son id (`modele`, visible dans " +
         "Dendreo > Paramètres > Modèles de documents). Contexte : une session seule, une session + un participant, " +
-        "une entreprise, un formateur ou un module, ou hors session une fiche participant/entreprise/formateur/module. " +
+        "une entreprise, un formateur ou un module, une session + participant + module (document module × participant), " +
+        "une facture ou un devis, ou hors session une fiche participant/entreprise/formateur/module. " +
         "`tous_les_participants=true` génère le document pour chaque inscrit de la session.",
       inputSchema: {
         modele: z.string().describe("Id du modèle de document (id_doc_type)"),
@@ -49,7 +50,9 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         tous_les_participants: z.boolean().default(false),
         entreprise: z.string().optional().describe("Raison sociale, ENT_… ou id"),
         formateur: z.string().optional().describe("Prénom et nom, ou id"),
-        module: z.string().optional().describe("Intitulé, MOD_… ou id"),
+        module: z.string().optional().describe("Intitulé, MOD_… ou id (avec session + participant : document module × participant)"),
+        facture: z.string().optional().describe("Numéro complet (FA_…) ou id d'une facture"),
+        devis: z.string().optional().describe("Id d'un devis"),
         format: z.enum(["pdf", "word"]).default("pdf"),
       },
       annotations: { readOnlyHint: true },
@@ -58,12 +61,33 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
       const base: Query = { id_doc_type: args.modele, generate: 1, pdf: args.format === "pdf" ? 1 : 0 };
       const demandes: { libelle: string; query: Query }[] = [];
 
-      if (args.session) {
+      if (args.facture) {
+        const rows = /^\d+$/.test(args.facture)
+          ? await client.list("factures.php", { id: args.facture })
+          : await client.list("factures.php", { numero_complet: args.facture });
+        const f = single(rows, "Facture");
+        if (!("row" in f)) return json(f);
+        demandes.push({ libelle: String(f.row.numero_complet), query: { m: "facture", ...base, id_facture: String(f.row.id_facture) } });
+      } else if (args.devis) {
+        demandes.push({ libelle: `devis ${args.devis}`, query: { m: "devis", ...base, id_devis: args.devis } });
+      } else if (args.session) {
         const s = single(await findSession(client, args.session), "Session");
         if (!("row" in s)) return json(s);
         const idAdf = String(s.row.id_action_de_formation);
         const ctx = { ...base, id_adf: idAdf };
-        if (args.participant || args.tous_les_participants) {
+        if (args.participant && args.module) {
+          const laps = await inscriptionsSession(client, idAdf);
+          const cibles = findInscription(laps, args.participant);
+          if (cibles.length !== 1) return json({ erreur: cibles.length ? "Participant ambigu." : "Participant non inscrit à cette session." });
+          const mods = new Set((await findModule(client, args.module)).map((m) => String(m.id_module)));
+          const lam = (await client.list("lams.php", { id_action_de_formation: idAdf })).find((l) => mods.has(String(l.id_module)));
+          if (!lam) return json({ erreur: "Ce module n'est pas programmé dans la session." });
+          const lmp = (await client.list("lmps.php", { id_action_de_formation: idAdf })).find(
+            (l) => String(l.id_lam) === String(lam.id_lam) && String(l.id_lap) === String(cibles[0].id_lap),
+          );
+          if (!lmp) return json({ erreur: "Ce participant n'est pas inscrit à ce module." });
+          demandes.push({ libelle: `${nomLap(cibles[0])} × ${lam.intitule ?? lam.id_module}`, query: { m: "adf_module_participant", ...ctx, id_lmp: String(lmp.id_lmp) } });
+        } else if (args.participant || args.tous_les_participants) {
           const laps = await inscriptionsSession(client, idAdf);
           const cibles = args.tous_les_participants
             ? laps.filter((l) => String(l.id_participant) !== "0")

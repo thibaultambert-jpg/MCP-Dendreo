@@ -3,6 +3,8 @@ import { DendreoClient } from "./dendreo/client.js";
 import { registerCreationTools } from "./tools/creation.js";
 import { registerCrmTools } from "./tools/crm.js";
 import { registerDocumentTools } from "./tools/documents.js";
+import { registerExportTools } from "./tools/exports.js";
+import { registerFinanceTools } from "./tools/finance.js";
 import { registerGenericTools } from "./tools/generic.js";
 import { registerGestionTools } from "./tools/gestion.js";
 import { registerInscriptionTools } from "./tools/inscriptions.js";
@@ -25,6 +27,8 @@ export function createServer(): McpServer {
   registerCrmTools(server, client);
   registerDocumentTools(server, client);
   registerSyntheseTools(server, client);
+  registerExportTools(server, client);
+  registerFinanceTools(server, client);
   registerGenericTools(server, client);
   return server;
 }
