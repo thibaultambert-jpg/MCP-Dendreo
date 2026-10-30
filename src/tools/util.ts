@@ -54,3 +54,29 @@ export const CHAMPS_PERSONNALISES = z
   .record(z.union([z.string(), z.number(), z.boolean()]))
   .optional()
   .describe("Champs personnalisés par nom technique (visible dans Dendreo, configuration des champs additionnels)");
+
+/** Nombre issu d'une valeur Dendreo (chaîne vide ou absente → 0). */
+export const num = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/** Arrondi à 2 décimales. */
+export const arrondi = (n: number): number => Math.round(n * 100) / 100;
+
+/** Découpe une liste en lots (les filtres multi-ids passent en `?id=1,2,3`). */
+export function lots<T>(items: T[], taille = 50): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += taille) out.push(items.slice(i, i + taille));
+  return out;
+}
+
+/** Durée en heures entre deux « AAAA-MM-JJ HH:MM:SS » d'un créneau. */
+export function heuresCreneau(c: Record<string, unknown>): number {
+  const a = Date.parse(`${String(c.date_debut).replace(" ", "T")}Z`);
+  const b = Date.parse(`${String(c.date_fin).replace(" ", "T")}Z`);
+  return Number.isFinite(a) && Number.isFinite(b) && b > a ? (b - a) / 3_600_000 : 0;
+}
+
+/** Date Dendreo renseignée (ni vide ni « 0000-00-00 »). */
+export const dateRenseignee = (v: unknown): boolean => !!v && !String(v).startsWith("0000");

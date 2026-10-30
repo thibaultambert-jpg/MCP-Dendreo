@@ -40,7 +40,8 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         "Génère un document à partir d'un modèle Dendreo (convocation, convention, attestation, certificat de " +
         "réalisation, programme…) et renvoie le fichier. Le modèle se désigne par son id (`modele`, visible dans " +
         "Dendreo > Paramètres > Modèles de documents). Contexte : une session seule, une session + un participant, " +
-        "une entreprise, un formateur ou un module, ou hors session une fiche participant/entreprise/formateur/module. " +
+        "une entreprise, un formateur ou un module, une session + participant + module (document module × participant), " +
+        "une facture ou un devis, ou hors session une fiche participant/entreprise/formateur/module. " +
         "`tous_les_participants=true` génère le document pour chaque inscrit de la session.",
       inputSchema: {
         modele: z.string().describe("Id du modèle de document (id_doc_type)"),
@@ -49,7 +50,9 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         tous_les_participants: z.boolean().default(false),
         entreprise: z.string().optional().describe("Raison sociale, ENT_… ou id"),
         formateur: z.string().optional().describe("Prénom et nom, ou id"),
-        module: z.string().optional().describe("Intitulé, MOD_… ou id"),
+        module: z.string().optional().describe("Intitulé, MOD_… ou id (avec session + participant : document module × participant)"),
+        facture: z.string().optional().describe("Numéro complet (FA_…) ou id d'une facture"),
+        devis: z.string().optional().describe("Id d'un devis"),
         format: z.enum(["pdf", "word"]).default("pdf"),
       },
       annotations: { readOnlyHint: true },
@@ -58,12 +61,33 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
       const base: Query = { id_doc_type: args.modele, generate: 1, pdf: args.format === "pdf" ? 1 : 0 };
       const demandes: { libelle: string; query: Query }[] = [];
 
-      if (args.session) {
+      if (args.facture) {
+        const rows = /^\d+$/.test(args.facture)
+          ? await client.list("factures.php", { id: args.facture })
+          : await client.list("factures.php", { numero_complet: args.facture });
+        const f = single(rows, "Facture");
+        if (!("row" in f)) return json(f);
+        demandes.push({ libelle: String(f.row.numero_complet), query: { m: "facture", ...base, id_facture: String(f.row.id_facture) } });
+      } else if (args.devis) {
+        demandes.push({ libelle: `devis ${args.devis}`, query: { m: "devis", ...base, id_devis: args.devis } });
+      } else if (args.session) {
         const s = single(await findSession(client, args.session), "Session");
         if (!("row" in s)) return json(s);
         const idAdf = String(s.row.id_action_de_formation);
         const ctx = { ...base, id_adf: idAdf };
-        if (args.participant || args.tous_les_participants) {
+        if (args.participant && args.module) {
+          const laps = await inscriptionsSession(client, idAdf);
+          const cibles = findInscription(laps, args.participant);
+          if (cibles.length !== 1) return json({ erreur: cibles.length ? "Participant ambigu." : "Participant non inscrit à cette session." });
+          const mods = new Set((await findModule(client, args.module)).map((m) => String(m.id_module)));
+          const lam = (await client.list("lams.php", { id_action_de_formation: idAdf })).find((l) => mods.has(String(l.id_module)));
+          if (!lam) return json({ erreur: "Ce module n'est pas programmé dans la session." });
+          const lmp = (await client.list("lmps.php", { id_action_de_formation: idAdf })).find(
+            (l) => String(l.id_lam) === String(lam.id_lam) && String(l.id_lap) === String(cibles[0].id_lap),
+          );
+          if (!lmp) return json({ erreur: "Ce participant n'est pas inscrit à ce module." });
+          demandes.push({ libelle: `${nomLap(cibles[0])} × ${lam.intitule ?? lam.id_module}`, query: { m: "adf_module_participant", ...ctx, id_lmp: String(lmp.id_lmp) } });
+        } else if (args.participant || args.tous_les_participants) {
           const laps = await inscriptionsSession(client, idAdf);
           const cibles = args.tous_les_participants
             ? laps.filter((l) => String(l.id_participant) !== "0")
@@ -149,12 +173,14 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         "Dépôt et suppression en dry_run=true par défaut.",
       inputSchema: {
         action: z.enum(["lister", "deposer", "supprimer"]).default("lister"),
-        cible: z.enum(["action-de-formation", "participant", "entreprise", "formateur", "module", "contact"]).optional(),
+        cible: z.enum(["action-de-formation", "participant", "entreprise", "formateur", "module", "contact", "lap", "laf", "lae", "salle"]).optional().describe("Sans cible, un dépôt part sans rattachement (tri automatique par QR code de Dendreo)"),
         id_cible: z.string().optional().describe("Id de la fiche, ou de la session (id ou ADF_…) si cible=action-de-formation"),
-        collection: z.string().optional().describe("Collection Dendreo, par défaut l'espace de stockage (docssaved)"),
+        collection: z.string().optional().describe("Collection Dendreo, par défaut l'espace de stockage (docssaved). Autres : partage_adf_participants / _formateurs / _entreprises, partage_lap, partage_laf, partage_lae, partage_salle_public, partage_module_public, partage_module_formateurs, visuel, signature"),
         nom_fichier: z.string().optional().describe("Pour deposer : nom du fichier avec extension"),
         contenu_base64: z.string().optional().describe("Pour deposer : contenu du fichier encodé en base64"),
         dossier: z.string().optional().describe("Pour deposer sur une session : sous-dossier de l'espace de stockage"),
+        entite_liee_type: z.enum(["entreprise", "participant", "formateur", "module"]).optional().describe("Pour deposer sur une session : lie le fichier à cet élément de la session"),
+        entite_liee_id: z.string().optional().describe("Id de l'élément lié (avec entite_liee_type)"),
         ids: z.array(z.string()).optional().describe("Pour supprimer : ids des fichiers"),
         dry_run: z.boolean().default(true),
       },
@@ -168,6 +194,13 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         if (args.dry_run) return json({ dry_run: true, ...recap });
         await client.delete("fichiers.php", { id: args.ids.join(",") });
         return json({ ok: true, ...recap });
+      }
+      if (args.action === "deposer" && !args.cible && !args.id_cible) {
+        if (!args.nom_fichier || !args.contenu_base64) return json({ erreur: "Préciser nom_fichier et contenu_base64." });
+        const contenu = Buffer.from(args.contenu_base64, "base64");
+        const recap = { fichier: args.nom_fichier, taille_ko: Math.round(contenu.length / 1024), rattachement: "aucun (tri automatique par QR code)" };
+        if (args.dry_run) return json({ dry_run: true, ...recap });
+        return json({ ok: true, ...recap, resultat: await client.postFile("fichiers.php", {}, { nom: args.nom_fichier, contenu }) });
       }
       if (!args.cible || !args.id_cible) return json({ erreur: "Préciser cible et id_cible." });
       let idCible = args.id_cible;
@@ -198,6 +231,8 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         id_cible: idCible,
         collection: args.collection ?? "docssaved",
         chemin: args.dossier,
+        entite_liee_type: args.entite_liee_type,
+        entite_liee_id: args.entite_liee_id,
       };
       const recap = { fichier: args.nom_fichier, taille_ko: Math.round(contenu.length / 1024), ...champs };
       if (args.dry_run) return json({ dry_run: true, ...recap });
@@ -217,6 +252,10 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         session: SESSION.optional(),
         destinataire: z.string().optional().describe("Adresse email du destinataire"),
         echecs_seulement: z.boolean().default(false),
+        evenement: z.enum(["delivered", "dropped", "bounced", "complained"]).optional().describe("Filtrer sur le statut d'un destinataire"),
+        du: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Emails envoyés à partir de cette date"),
+        au: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Emails envoyés jusqu'à cette date"),
+        decalage: z.number().int().min(0).default(0).describe("Pagination : l'API renvoie 100 emails à partir de ce rang"),
       },
       annotations: { readOnlyHint: true },
     },
@@ -229,10 +268,10 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         idAdf = String(s.row.id_action_de_formation);
         label = sessionLabel(s.row);
       }
-      const rows = await client.list("emails.php", { id_action_de_formation: idAdf, to_email: args.destinataire });
-      let emails = rows.map(resumeEmail);
+      const rows = await client.list("emails.php", { id_action_de_formation: idAdf, to_email: args.destinataire, event: args.evenement, offset: args.decalage || undefined });
+      let emails = rows.map(resumeEmail).filter((e) => (!args.du || String(e.date).slice(0, 10) >= args.du) && (!args.au || String(e.date).slice(0, 10) <= args.au));
       if (args.echecs_seulement) emails = emails.filter((e) => e.en_echec);
-      return json({ session: label, nombre: emails.length, en_echec: emails.filter((e) => e.en_echec).length, emails });
+      return json({ session: label, page: rows.length >= 100 ? `100 emails lus à partir du rang ${args.decalage} : relancer avec decalage=${args.decalage + 100} pour la suite` : undefined, nombre: emails.length, en_echec: emails.filter((e) => e.en_echec).length, emails });
     },
   );
 
@@ -242,7 +281,8 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
       title: "Checklist administrative",
       description:
         "Affiche l'avancement des checklists d'une session (ou d'un formateur, d'un module) et permet de cocher ou " +
-        "décocher des points, ou d'en ajouter. Modifications en dry_run=true par défaut.",
+        "décocher, ajouter, renommer ou supprimer des points ; `portefeuille=true` liste les sessions INTER dont la " +
+        "checklist est incomplète. Modifications en dry_run=true par défaut.",
       inputSchema: {
         session: SESSION.optional(),
         cible: z.enum(["formateur", "module", "lap", "laf"]).optional().describe("Autre cible que la session"),
@@ -250,12 +290,22 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
         cocher: z.array(z.string()).optional().describe("Points à cocher (id_check ou intitulé)"),
         decocher: z.array(z.string()).optional().describe("Points à décocher (id_check ou intitulé)"),
         ajouter: z.array(z.string()).optional().describe("Nouveaux points à ajouter"),
+        supprimer: z.array(z.string()).optional().describe("Points à supprimer (id_check ou intitulé)"),
+        renommer: z.array(z.object({ point: z.string().describe("id_check ou intitulé actuel"), intitule: z.string() })).optional(),
+        portefeuille: z.boolean().default(false).describe("Vue d'ensemble : sessions INTER dont la checklist est incomplète"),
         id_checklist: z.string().optional().describe("Checklist où ajouter, si la cible en a plusieurs"),
         dry_run: z.boolean().default(true),
       },
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
     async (args) => {
+      if (args.portefeuille) {
+        const rows = await client.list("checklists.php", { cible: "action_de_formation_inter" });
+        const incompletes = rows
+          .filter((c) => Number(c.checks_done ?? 0) < Number(c.checks_total ?? 0))
+          .map((c) => ({ id_cible: c.id_cible, id_checklist: c.id_checklist, remarque: c.remarque || undefined, avancement: `${c.checks_done}/${c.checks_total}`, restant: ((c.checks ?? []) as Row[]).filter((k) => !vrai(k.done)).map((k) => k.intitule) }));
+        return json({ checklists_incompletes: incompletes.length, sur: rows.length, incompletes });
+      }
       let query: Query;
       let label: string;
       if (args.session) {
@@ -273,7 +323,7 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
       const checks: Row[] = checklists.flatMap((c) => ((c.checks ?? []) as Row[]).map((k) => ({ ...k, id_checklist: c.id_checklist })));
       const trouver = (q: string) => checks.filter((k) => String(k.id_check) === q || String(k.intitule).toLowerCase().includes(q.toLowerCase()));
 
-      const ops: { quoi: string; body: Row }[] = [];
+      const ops: { quoi: string; body: Row; suppression?: boolean }[] = [];
       const inconnus: string[] = [];
       for (const [liste, done] of [[args.cocher, 1], [args.decocher, 0]] as const) {
         for (const q of liste ?? []) {
@@ -283,6 +333,16 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
             ops.push({ quoi: `${done ? "cocher" : "décocher"} « ${found[0].intitule} »`, body: { id_check: found[0].id_check, done } });
           }
         }
+      }
+      for (const q of args.supprimer ?? []) {
+        const found = trouver(q);
+        if (found.length !== 1) inconnus.push(`${q} (${found.length ? "ambigu" : "introuvable"})`);
+        else ops.push({ quoi: `supprimer « ${found[0].intitule} »`, body: { id_check: found[0].id_check }, suppression: true });
+      }
+      for (const r of args.renommer ?? []) {
+        const found = trouver(r.point);
+        if (found.length !== 1) inconnus.push(`${r.point} (${found.length ? "ambigu" : "introuvable"})`);
+        else ops.push({ quoi: `renommer « ${found[0].intitule} » en « ${r.intitule} »`, body: { id_check: found[0].id_check, intitule: r.intitule } });
       }
       if (args.ajouter?.length) {
         const idChecklist = args.id_checklist ?? (checklists.length === 1 ? checklists[0].id_checklist : undefined);
@@ -307,7 +367,8 @@ export function registerDocumentTools(server: McpServer, client: DendreoClient) 
       const journal: string[] = [];
       for (const o of ops) {
         try {
-          await client.post("checks.php", o.body);
+          if (o.suppression) await client.delete("checks.php", { id_check: String(o.body.id_check) });
+          else await client.post("checks.php", o.body);
           journal.push(`${o.quoi} : ok`);
         } catch (e) {
           journal.push(`${o.quoi} : erreur : ${(e as Error).message}`);

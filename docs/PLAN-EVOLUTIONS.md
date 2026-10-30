@@ -2,7 +2,7 @@
 
 > Propositions de nouvelles actions, établies à partir de la documentation technique de l'API (`docs/technique-api/`, 7 parties) et des 70 fiches fonctionnelles (`docs/Features/`), comparées aux 45 outils existants (`src/tools/*.ts`).
 >
-> **Statut : proposition, non exécutée.**
+> **Statut : mis en œuvre** (79 outils au total). Écritures non testées sur une instance réelle : voir §10.
 
 ---
 

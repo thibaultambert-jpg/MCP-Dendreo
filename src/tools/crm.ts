@@ -1,8 +1,9 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { DendreoClient, Row } from "../dendreo/client.js";
-import { findEntreprise, single } from "./resolve.js";
-import { CHAMPS_PERSONNALISES, json, nomDe, normalize, today } from "./util.js";
+import { appliquer } from "./ecriture.js";
+import { findEntreprise, findSession, inscriptionsSession, single } from "./resolve.js";
+import { CHAMPS_PERSONNALISES, json, nomDe, normalize, num, today, vrai } from "./util.js";
 
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const ENTREPRISE = z.string().describe("Raison sociale, numéro ENT_… ou id");
@@ -509,5 +510,283 @@ export function registerCrmTools(server: McpServer, client: DendreoClient) {
       if (args.dry_run) return json({ dry_run: true, entreprise: entreprise.raison_sociale, opportunite: body });
       return json({ ok: true, resultat: await client.post("opportunites.php", body) });
     },
+  );
+}
+
+const LIGNE = z.record(z.union([z.string(), z.number(), z.boolean()]));
+const MAX_LIGNES = 200;
+
+export function registerCrmNettoyageTools(server: McpServer, client: DendreoClient) {
+  server.registerTool(
+    "enregistrer_particulier",
+    {
+      title: "Créer ou mettre à jour un particulier",
+      description:
+        "Crée un particulier (personne finançant elle-même sa formation : fiche contact + entreprise + participant) ou met à jour " +
+        "sa fiche, retrouvée par id ou email. Par défaut dry_run=true : rien n'est écrit.",
+      inputSchema: {
+        id_contact: z.string().optional().describe("Particulier à mettre à jour (id_contact)"),
+        email: z.string().email().optional(),
+        nom: z.string().optional(),
+        prenom: z.string().optional(),
+        civilite: z.string().optional(),
+        fonction: z.string().optional(),
+        telephone_direct: z.string().optional(),
+        portable: z.string().optional(),
+        adresse: z.string().optional(),
+        code_postal: z.string().optional(),
+        ville: z.string().optional(),
+        statut_bpf: z.enum(["independant", "cpf_autonome", "recherche_emploi", "hors_bpf"]).optional(),
+        dry_run: z.boolean().default(true),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (args) => {
+      let existant: Row | undefined;
+      if (args.id_contact) {
+        [existant] = await client.list("contacts.php", { id: args.id_contact });
+        if (!existant) return json({ erreur: "Particulier introuvable." });
+      } else if (args.email) {
+        existant = (await client.list("contacts.php", { email: args.email })).find((c) => vrai(c.particulier));
+      }
+      if (!existant && (!args.nom || !args.prenom)) return json({ erreur: "En création, le nom et le prénom sont obligatoires." });
+      const body = champs({
+        nom: args.nom, prenom: args.prenom, civilite: args.civilite, fonction: args.fonction, email: args.email,
+        telephone_direct: args.telephone_direct, portable: args.portable, adresse: args.adresse, code_postal: args.code_postal,
+        ville: args.ville, statut_bpf: args.statut_bpf,
+      });
+      const recap = {
+        action: existant ? "mise_a_jour" : "creation",
+        particulier: `${args.prenom ?? existant?.prenom ?? ""} ${args.nom ?? existant?.nom ?? ""}`.trim(),
+        ...(existant ? { id_contact: existant.id_contact, avant: Object.fromEntries(Object.keys(body).map((k) => [k, existant![k]])) } : {}),
+        valeurs: body,
+      };
+      return appliquer(args.dry_run, recap, () =>
+        existant ? client.post("particuliers.php", { id_contact: existant.id_contact, ...body }) : client.post("contacts.php", { particulier: 1, ...body }),
+      );
+    },
+  );
+
+  server.registerTool(
+    "convertir_particulier_en_entreprise",
+    {
+      title: "Convertir un particulier en entreprise",
+      description:
+        "Transforme un particulier en entreprise + contact + participant (par exemple quand un indépendant devient client avec sa " +
+        "société). Par défaut dry_run=true. Le sens inverse est `convertir_en_particulier`.",
+      inputSchema: {
+        id_contact: z.string().optional(),
+        email: z.string().email().optional().describe("À la place de id_contact"),
+        dry_run: z.boolean().default(true),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (args) => {
+      let contact: Row | undefined;
+      if (args.id_contact) [contact] = await client.list("contacts.php", { id: args.id_contact });
+      else if (args.email) contact = (await client.list("contacts.php", { email: args.email })).find((c) => vrai(c.particulier));
+      else return json({ erreur: "Préciser id_contact ou email." });
+      if (!contact) return json({ erreur: "Particulier introuvable." });
+      if (!vrai(contact.particulier)) return json({ erreur: "Cette fiche n'est pas un particulier.", contact: { id_contact: contact.id_contact, nom: nomDe(contact) } });
+      return appliquer(args.dry_run, { particulier: nomDe(contact), id_contact: contact.id_contact }, () =>
+        client.post("contacts.php", { id_contact: contact!.id_contact, convert_to_entreprise_contact_participant: 1 }),
+      );
+    },
+  );
+
+  server.registerTool(
+    "importer_crm",
+    {
+      title: "Importer des fiches CRM en masse",
+      description:
+        `Importe jusqu'à ${MAX_LIGNES} fiches d'un même type (entreprises, contacts, participants, particuliers) depuis une liste. ` +
+        "Dédoublonnage : entreprises par SIRET puis raison sociale ; contacts, participants et particuliers par email. " +
+        "Une fiche existante est ignorée, ou mise à jour avec `mettre_a_jour=true`. Les champs de chaque ligne portent le nom " +
+        "Dendreo (raison_sociale, siret, nom, prenom, email, fonction…) ; `entreprise` (raison sociale, ENT_… ou id) rattache " +
+        "contacts et participants. Simulation par défaut (dry_run=true) : à relire avant d'exécuter.",
+      inputSchema: {
+        type: z.enum(["entreprises", "contacts", "participants", "particuliers"]),
+        lignes: z.array(LIGNE).min(1).max(MAX_LIGNES),
+        mettre_a_jour: z.boolean().default(false),
+        dry_run: z.boolean().default(true),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (args) => {
+      const endpoint = args.type === "entreprises" ? "entreprises.php" : args.type === "participants" ? "participants.php" : "contacts.php";
+      const cle = args.type === "entreprises" ? "id_entreprise" : args.type === "participants" ? "id_participant" : "id_contact";
+      const entreprises = new Map<string, Row | null>();
+      type Plan = { ligne: number; libelle: string; action: "creer" | "mettre_a_jour" | "ignorer"; raison?: string; body?: Row };
+      const plan: Plan[] = [];
+      const vus = new Set<string>();
+      for (const [i, brut] of args.lignes.entries()) {
+        const { entreprise, ...l } = brut;
+        const body: Row = { ...l };
+        const libelle = String(l.raison_sociale ?? (`${l.prenom ?? ""} ${l.nom ?? ""}`.trim() || l.email || `ligne ${i + 1}`));
+        let ent: Row | undefined;
+        if (entreprise !== undefined) {
+          const k = String(entreprise);
+          if (!entreprises.has(k)) {
+            const r = await findEntreprise(client, k);
+            entreprises.set(k, r.length === 1 ? r[0] : null);
+          }
+          const e = entreprises.get(k);
+          if (!e) { plan.push({ ligne: i + 1, libelle, action: "ignorer", raison: `entreprise « ${k} » introuvable ou ambiguë` }); continue; }
+          ent = e;
+          body.id_entreprise = e.id_entreprise;
+        }
+        if (args.type === "entreprises" ? !l.raison_sociale : !l.nom) { plan.push({ ligne: i + 1, libelle, action: "ignorer", raison: args.type === "entreprises" ? "raison_sociale manquante" : "nom manquant" }); continue; }
+        if (args.type === "contacts" && !ent) { plan.push({ ligne: i + 1, libelle, action: "ignorer", raison: "entreprise requise pour un contact" }); continue; }
+        const doublonCle = normalize(args.type === "entreprises" ? l.siret || l.raison_sociale : l.email || `${l.prenom} ${l.nom}`);
+        if (vus.has(doublonCle)) { plan.push({ ligne: i + 1, libelle, action: "ignorer", raison: "doublon dans la liste" }); continue; }
+        vus.add(doublonCle);
+        let existant: Row | undefined;
+        if (args.type === "entreprises") {
+          if (l.siret) existant = (await client.list(endpoint, { siret: String(l.siret) }))[0];
+          existant ??= (await client.list(endpoint, { search: String(l.raison_sociale) })).find((e) => normalize(e.raison_sociale) === normalize(l.raison_sociale));
+        } else if (l.email) {
+          const trouves = await client.list(endpoint, { email: String(l.email) });
+          existant = args.type === "particuliers" ? trouves.find((c) => vrai(c.particulier)) : trouves.find((c) => !ent || String(c.id_entreprise) === String(ent.id_entreprise));
+        }
+        if (args.type === "particuliers") body.particulier = 1;
+        if (existant && !args.mettre_a_jour) plan.push({ ligne: i + 1, libelle, action: "ignorer", raison: `existe déjà (${cle} ${existant[cle]})` });
+        else if (existant) plan.push({ ligne: i + 1, libelle, action: "mettre_a_jour", body: { [cle]: existant[cle], ...body } });
+        else plan.push({ ligne: i + 1, libelle, action: "creer", body });
+      }
+      const compte = (a: Plan["action"]) => plan.filter((p) => p.action === a).length;
+      const recap = {
+        type: args.type,
+        a_creer: compte("creer"),
+        a_mettre_a_jour: compte("mettre_a_jour"),
+        ignorees: compte("ignorer"),
+        lignes: plan.map((p) => ({ ligne: p.ligne, fiche: p.libelle, action: p.action, raison: p.raison })),
+      };
+      if (args.dry_run) return json({ dry_run: true, ...recap });
+      const journal: string[] = [];
+      for (const p of plan.filter((x) => x.body)) {
+        try {
+          await client.post(args.type === "particuliers" && p.action === "mettre_a_jour" ? "particuliers.php" : endpoint, p.body!);
+          journal.push(`ligne ${p.ligne} ${p.libelle} : ${p.action === "creer" ? "créée" : "mise à jour"}`);
+        } catch (e) {
+          journal.push(`ligne ${p.ligne} ${p.libelle} : erreur : ${(e as Error).message}`);
+        }
+      }
+      return json({ ok: true, ...recap, journal });
+    },
+  );
+
+  server.registerTool(
+    "preinscriptions",
+    {
+      title: "Pré-inscriptions du catalogue à traiter",
+      description:
+        "Sessions qui ont reçu des pré-inscriptions depuis le catalogue public, avec le détail par statut (à traiter, en attente, " +
+        "paiement en attente, validées, refusées). Par défaut, seulement les sessions avec des pré-inscriptions à traiter.",
+      inputSchema: {
+        a_traiter_seulement: z.boolean().default(true),
+        debut_apres: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Sessions commençant à partir de cette date (défaut : aujourd'hui)"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (args) => {
+      const rows = await client.list("actions_de_formation.php", { include: "preinscriptions", started_after: args.debut_apres ?? today(), fields: "id_action_de_formation,numero_complet,intitule,date_debut" });
+      const sessions = rows
+        .map((r) => ({ r, p: (r.preinscriptions ?? {}) as Row }))
+        .filter(({ p }) => num(p.nb_preinscriptions) > 0 && (!args.a_traiter_seulement || num(p.nb_preinscriptions_a_traiter) > 0))
+        .map(({ r, p }) => ({ session: `${r.numero_complet} — ${r.intitule}`, debut: r.date_debut, preinscriptions: p }));
+      return json({ nombre_sessions: sessions.length, sessions });
+    },
+  );
+
+  server.registerTool(
+    "supprimer_session",
+    {
+      title: "Supprimer une session",
+      description:
+        "Supprime une action de formation, avec garde-fous : refusé si des participants sont inscrits ou si des présences sont " +
+        "saisies (annuler d'abord les inscriptions, ou passer la session à l'étape « Annulée » avec `modifier_session`). " +
+        "Par défaut dry_run=true. Irréversible : ne relancer avec dry_run=false qu'après confirmation explicite.",
+      inputSchema: { session: z.string().describe("Id ou numéro complet (ADF_…)"), dry_run: z.boolean().default(true) },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (args) => {
+      const s = single(await findSession(client, args.session, "id_action_de_formation,numero_complet,intitule,date_debut"), "Session");
+      if (!("row" in s)) return json(s);
+      const id = String(s.row.id_action_de_formation);
+      const [laps, lcps, factures] = await Promise.all([
+        inscriptionsSession(client, id),
+        client.list("lcps.php", { id_action_de_formation: id }),
+        client.list("factures.php", { id_action_de_formation: id }),
+      ]);
+      const bloquants: string[] = [];
+      if (laps.length) bloquants.push(`${laps.length} participant(s) inscrit(s)`);
+      if (lcps.some((p) => vrai(p.presence) || num(p.total_heures_absence) > 0)) bloquants.push("des présences ou absences sont saisies");
+      if (factures.length) bloquants.push(`${factures.length} facture(s) liée(s)`);
+      const recap = { session: `${s.row.numero_complet} — ${s.row.intitule}`, debut: s.row.date_debut };
+      if (bloquants.length) return json({ erreur: "Suppression refusée.", bloquants, ...recap });
+      return appliquer(args.dry_run, { action: "suppression", ...recap }, () => client.delete("actions_de_formation.php", { id }));
+    },
+  );
+
+  server.registerTool(
+    "supprimer_fiche",
+    {
+      title: "Supprimer une fiche CRM",
+      description:
+        "Supprime un participant, un contact, une entreprise ou une action commerciale, avec garde-fous (participant inscrit à des " +
+        "sessions, entreprise avec inscriptions : refusé). Supprimer le contact d'un particulier supprime tout le particulier. " +
+        "Une entreprise supprimée peut être restaurée avec `restaurer_entreprise`. Par défaut dry_run=true ; ne relancer avec " +
+        "dry_run=false qu'après confirmation explicite.",
+      inputSchema: {
+        type: z.enum(["participant", "contact", "entreprise", "action_commerciale"]),
+        id: z.string().describe("Id de la fiche"),
+        dry_run: z.boolean().default(true),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async (args) => {
+      const cfg = {
+        participant: { endpoint: "participants.php", cle: "id_participant" },
+        contact: { endpoint: "contacts.php", cle: "id_contact" },
+        entreprise: { endpoint: "entreprises.php", cle: "id_entreprise" },
+        action_commerciale: { endpoint: "actions_commerciales.php", cle: "id_action_commerciale" },
+      }[args.type];
+      const [fiche] = await client.list(cfg.endpoint, { id: args.id });
+      if (!fiche) return json({ erreur: "Fiche introuvable." });
+      const bloquants: string[] = [];
+      const avertissements: string[] = [];
+      if (args.type === "participant") {
+        const laps = await client.list("laps.php", { id_participant: args.id });
+        if (laps.length) bloquants.push(`inscrit à ${laps.length} session(s)`);
+      } else if (args.type === "entreprise") {
+        const [laps, contacts, participants] = await Promise.all([
+          client.list("laps.php", { id_entreprise: args.id }),
+          client.list("contacts.php", { id_entreprise: args.id, fields: "id_contact" }),
+          client.list("participants.php", { id_entreprise: args.id, fields: "id_participant" }),
+        ]);
+        if (laps.length) bloquants.push(`${laps.length} inscription(s) à des sessions`);
+        if (contacts.length || participants.length) avertissements.push(`${contacts.length} contact(s) et ${participants.length} participant(s) rattachés`);
+      } else if (args.type === "contact" && vrai(fiche.particulier)) {
+        avertissements.push("Contact d'un particulier : la suppression entraîne celle du particulier complet (contact, entreprise et participant).");
+      }
+      const libelle = String(fiche.raison_sociale ?? nomDe(fiche) ?? fiche.titre ?? args.id);
+      if (bloquants.length) return json({ erreur: "Suppression refusée.", bloquants, fiche: libelle });
+      return appliquer(args.dry_run, { action: "suppression", type: args.type, fiche: libelle, ...(avertissements.length ? { avertissements } : {}) }, () =>
+        client.delete(cfg.endpoint, { id: args.id }),
+      );
+    },
+  );
+
+  server.registerTool(
+    "restaurer_entreprise",
+    {
+      title: "Restaurer une entreprise supprimée",
+      description: "Restaure une entreprise supprimée, à partir de son id. Par défaut dry_run=true.",
+      inputSchema: { id_entreprise: z.string(), dry_run: z.boolean().default(true) },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (args) => appliquer(args.dry_run, { action: "restauration", id_entreprise: args.id_entreprise }, () =>
+      client.post("entreprises.php", { id: args.id_entreprise, restore: 1 }),
+    ),
   );
 }
