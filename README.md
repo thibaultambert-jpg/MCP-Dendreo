@@ -257,8 +257,46 @@ Variables d'environnement (voir `.env.example`) :
 |---|---|
 | `DENDREO_SLUG` | identifiant de l'instance (`https://pro.dendreo.com/<slug>/api/`) |
 | `DENDREO_API_KEY` | clé API Dendreo |
-| `MCP_AUTH_TOKEN` | jeton secret exigé dans l'URL du connecteur (`?token=`) ou en `Authorization: Bearer` |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | client OAuth Google (voir « Authentification ») |
+| `ALLOWED_EMAILS` | emails autorisés à utiliser le connecteur, séparés par des virgules |
+| `GOOGLE_WORKSPACE_DOMAIN` | optionnel : n'accepter que les comptes de ce domaine Google Workspace |
+| `OAUTH_SECRET` | secret de chiffrement des jetons, 32 caractères minimum (`openssl rand -base64 48`) |
+| `PUBLIC_URL` | adresse publique du serveur, ex. `https://mcp-dendreo.vercel.app` (sur Vercel, l'URL de production est utilisée si absente) |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | fortement recommandé en production : Redis Upstash (ou `KV_REST_API_URL` / `KV_REST_API_TOKEN`) |
+| `MCP_RATE_LIMIT` | optionnel : requêtes MCP maximum par utilisateur et par minute (défaut 120) |
+| `MCP_ALLOWED_ORIGINS` | optionnel : origines web supplémentaires autorisées sur `/api/mcp` |
 | `MCP_MESURE` | optionnel : `0` désactive la mesure des réponses (voir ci-dessous) |
+
+## Authentification
+
+Le connecteur suit la [spécification d'autorisation MCP](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization) : le serveur est à la fois la ressource protégée (`/api/mcp`) et son propre serveur d'autorisation OAuth 2.1, qui délègue l'identification à Google.
+
+1. claude.ai appelle `/api/mcp` sans jeton : réponse `401` avec l'adresse des métadonnées (`/.well-known/oauth-protected-resource/api/mcp`).
+2. claude.ai s'enregistre (`/oauth/register` ou Client ID Metadata Document) puis ouvre `/oauth/authorize` (PKCE S256 obligatoire).
+3. Le serveur affiche sa propre page de consentement (nom de l'application, accès demandés, adresse de retour), puis redirige vers Google.
+4. Au retour de Google (`/oauth/callback`), l'email doit être vérifié, appartenir au domaine `GOOGLE_WORKSPACE_DOMAIN` s'il est défini, **et figurer dans `ALLOWED_EMAILS`**. Sinon : page « Accès non autorisé ».
+5. claude.ai échange le code (`/oauth/token`) contre un jeton d'accès d'une heure, lié au seul endpoint `/api/mcp`, et un jeton de rafraîchissement de 30 jours.
+
+**Gérer les personnes autorisées** : modifier `ALLOWED_EMAILS` dans Vercel (Settings > Environment Variables) puis redéployer. La liste est relue à chaque requête : une personne retirée perd l'accès dès le redéploiement, même si elle était déjà connectée.
+
+**Créer le client Google** (une fois) dans la [console Google Cloud](https://console.cloud.google.com/apis/credentials) du compte Workspace :
+
+1. Écran de consentement OAuth : type d'utilisateur **Interne** (seuls les comptes de l'organisation peuvent se connecter), portées `openid` et `email`.
+2. Identifiants > Créer > ID client OAuth > **Application Web**.
+3. URI de redirection autorisée : `https://<app>.vercel.app/oauth/callback` (et `http://localhost:3000/oauth/callback` pour les tests).
+4. Copier l'ID et le secret dans `GOOGLE_CLIENT_ID` et `GOOGLE_CLIENT_SECRET`.
+
+**Sécurité** :
+
+- jetons opaques chiffrés (AES-256-GCM, clé dérivée d'`OAUTH_SECRET`), acceptés uniquement dans l'en-tête `Authorization: Bearer`, jamais dans l'URL ; la clé Dendreo n'est jamais transmise au client ;
+- codes à usage unique (5 min), rotation des jetons de rafraîchissement : un code ou un jeton rejoué révoque toute la connexion ;
+- page de consentement protégée (CSRF, cookies `__Host-`, `frame-ancestors 'none'`), état Google lié au navigateur et à usage unique ;
+- en-tête `Origin` vérifié sur `/api/mcp` (403 si l'origine n'est pas autorisée) ;
+- limitation de débit par utilisateur sur `/api/mcp` et par adresse IP sur les endpoints OAuth (réponse `429`).
+
+Sans Redis, le serveur fonctionne mais l'usage unique, la révocation et la limitation de débit ne valent qu'au sein d'une instance Vercel : brancher Upstash Redis (Vercel > Storage) en production.
+
+**Changer `OAUTH_SECRET`** invalide toutes les connexions et tous les enregistrements de clients : il faudra reconnecter le connecteur dans claude.ai.
 
 ## Mesure de la consommation
 
@@ -274,12 +312,18 @@ Sur Vercel : projet > **Logs**, rechercher `mcp_outil`. Les outils qui reviennen
 
 ```bash
 npm install
-DENDREO_SLUG=... DENDREO_API_KEY=... MCP_AUTH_TOKEN=... npm run dev
-npx @modelcontextprotocol/inspector   # URL : http://localhost:3000/api/mcp?token=...
+npm test   # parcours OAuth complet (Google simulé) et endpoint MCP
+cp .env.example .env   # renseigner les variables, PUBLIC_URL=http://localhost:3000
+set -a; . ./.env; set +a; npm run dev
+npx @modelcontextprotocol/inspector   # URL : http://localhost:3000/api/mcp, puis « Open Auth Settings » > connexion OAuth
 ```
+
+Le serveur local n'écoute que sur `127.0.0.1` (variable `HOST` pour changer).
 
 ## Déploiement (Vercel) et branchement à claude.ai
 
-1. Importer le dépôt dans Vercel et renseigner les trois variables d'environnement.
-2. Dans claude.ai : Paramètres > Connecteurs > Ajouter un connecteur personnalisé, URL :
-   `https://<app>.vercel.app/api/mcp?token=<MCP_AUTH_TOKEN>`
+1. Importer le dépôt dans Vercel, renseigner les variables d'environnement et, de préférence, ajouter un stockage Upstash Redis (Storage).
+2. Dans claude.ai : Paramètres > Connecteurs > Ajouter un connecteur personnalisé, URL : `https://<app>.vercel.app/api/mcp` (sans jeton).
+3. Cliquer sur « Se connecter » : page de consentement du serveur, puis connexion Google avec un compte autorisé.
+
+Les réécritures de `vercel.json` servent les métadonnées (`/.well-known/...`) et les endpoints `/oauth/*` depuis la fonction `api/oauth.ts`.

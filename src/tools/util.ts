@@ -32,8 +32,14 @@ export function resumeReponse(r: unknown): unknown {
   return JSON.stringify(r).length <= 300 ? r : { champs_renvoyes: Object.keys(r).length };
 }
 
+/**
+ * Résultat d'outil en JSON. Une réponse `{ erreur: … }` ou `{ ok: false, … }` est signalée comme
+ * erreur d'exécution (`isError: true`), comme le demande la spécification MCP, pour que le modèle corrige et réessaie.
+ */
 export function json(data: unknown): CallToolResult {
-  return { content: [{ type: "text", text: serialiser(data) }] };
+  const o = data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : undefined;
+  const echec = !!o && (o.ok === false || (o.erreur !== undefined && o.erreur !== null && o.erreur !== ""));
+  return { content: [{ type: "text", text: serialiser(data) }], ...(echec ? { isError: true } : {}) };
 }
 
 /** Date AAAA-MM-JJ (message explicite : le motif n'est pas annoncé dans le schéma, cf. slim.ts). */
