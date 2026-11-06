@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "dev": "tsx src/local.ts",
     "start": "node dist/src/local.js",
-    "vercel-build": "tsc --noEmit"
+    "vercel-build": "tsc --noEmit",
+    "test": "MCP_MESURE=0 tsx tests/auth.e2e.mts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

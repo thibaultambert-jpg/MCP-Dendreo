@@ -45,6 +45,8 @@ export function createServer(): McpServer {
   registerQualiteTools(server, client);
   registerCatalogueTools(server, client);
   registerGenericTools(server, client);
+  // La liste des outils est fixe : ne pas annoncer de notifications de changement qui ne viendront jamais.
+  server.server.registerCapabilities({ tools: { listChanged: false } });
   allegerListeOutils(server);
   mesurerAppels(server);
   return server;
