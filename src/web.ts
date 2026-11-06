@@ -5,7 +5,12 @@ export function envoyerJson(res: ServerResponse, statut: number, corps: unknown,
   res.writeHead(statut, { "Content-Type": "application/json", "Cache-Control": "no-store", ...entetes }).end(JSON.stringify(corps));
 }
 
-/** En-têtes des pages HTML : pas de cache, pas d'iframe (clickjacking), aucun script. */
+/**
+ * En-têtes des pages HTML : pas de cache, pas d'iframe (clickjacking), aucun script.
+ * `Referrer-Policy: same-origin` et non `no-referrer` : avec `no-referrer`, les navigateurs envoient
+ * `Origin: null` à la validation du formulaire de consentement, que le contrôle d'origine refuserait.
+ * Rien n'est transmis aux autres sites (lien de retour vers l'application).
+ */
 export function envoyerHtml(res: ServerResponse, statut: number, html: string, entetes: Record<string, string | string[]> = {}) {
   res
     .writeHead(statut, {
@@ -13,7 +18,7 @@ export function envoyerHtml(res: ServerResponse, statut: number, html: string, e
       "Cache-Control": "no-store",
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
       "X-Frame-Options": "DENY",
-      "Referrer-Policy": "no-referrer",
+      "Referrer-Policy": "same-origin",
       "X-Content-Type-Options": "nosniff",
       ...entetes,
     })
